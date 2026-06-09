@@ -83,19 +83,24 @@ def check_momo():
 
 
 def check_bahamut():
+    """巴哈姆特哈拉市集（實際商城網域）"""
     kw = requests.utils.quote(KEYWORD)
-    url = f"https://mall.gamer.com.tw/search?q={kw}"
+    # 巴哈商城正確網域
+    url = f"https://shopitems.gamer.com.tw/search?q={kw}"
     try:
         r = requests.get(url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(r.text, "html.parser")
-        for item in soup.select(".product-item, [class*='product'], .item-block"):
-            el = item.find(class_=re.compile("title|name", re.I)) or item.find("h3")
+        for item in soup.select(".item, .product, [class*='item'], [class*='product']"):
+            el = item.find(class_=re.compile("title|name", re.I)) or item.find("h3") or item.find("h2")
             if el and is_target(el.get_text()):
                 a = item.find("a", href=True)
                 href = a["href"] if a else url
                 if href.startswith("/"):
-                    href = "https://mall.gamer.com.tw" + href
+                    href = "https://shopitems.gamer.com.tw" + href
                 return True, href
+        # 備用：直接搜尋頁面文字
+        if is_target(soup.get_text()):
+            return True, url
         return False, None
     except Exception as e:
         print(f"[巴哈] 錯誤: {e}")
@@ -103,20 +108,30 @@ def check_bahamut():
 
 
 def check_pchome():
+    """PChome 24h — 改用 search API v2"""
     kw = requests.utils.quote(KEYWORD_SHORT)
-    api_url = (
-        f"https://ecapi.pchome.com.tw/cdn/ecshop/cate_prod/v8/search?"
-        f"q={kw}&fields=Id,Nick,Price&offset=0&limit=20&sort=sale/dc"
-    )
-    fallback = f"https://24h.pchome.com.tw/search/#/q={kw}"
+    search_url = f"https://search.pchome.com.tw/search?q={kw}&scope=all"
+    fallback_url = f"https://24h.pchome.com.tw/search/#/q={kw}"
     try:
-        r = requests.get(api_url, headers=HEADERS, timeout=15)
-        data = r.json()
-        prods = data if isinstance(data, list) else data.get("Prods", [])
-        for prod in prods:
-            if is_target(prod.get("Nick", "")):
-                pid = prod.get("Id", "")
-                return True, f"https://24h.pchome.com.tw/prod/{pid}"
+        r = requests.get(search_url, headers=HEADERS, timeout=15)
+        soup = BeautifulSoup(r.text, "html.parser")
+        # 嘗試解析搜尋結果
+        for item in soup.select(".prod-item, [class*='prod'], [data-ga-product]"):
+            el = item.find(class_=re.compile("title|name|nick", re.I)) or item.find("h3") or item.find("h2")
+            if el and is_target(el.get_text()):
+                a = item.find("a", href=True)
+                return True, a["href"] if a else fallback_url
+        # 備用：抓 JSON-LD 結構化資料
+        for script in soup.find_all("script", type="application/ld+json"):
+            try:
+                data = json.loads(script.string or "")
+                items = data if isinstance(data, list) else [data]
+                for item in items:
+                    name = item.get("name", "")
+                    if is_target(name):
+                        return True, item.get("url", fallback_url)
+            except Exception:
+                pass
         return False, None
     except Exception as e:
         print(f"[PChome] 錯誤: {e}")
@@ -177,6 +192,15 @@ def main():
         print("Telegram 通知已發送！")
     else:
         print("本次未發現商品上架。")
+        # 每天 UTC 00:00（台灣時間 08:00）發一次心跳確認
+        from datetime import datetime as _dt
+        if _dt.utcnow().hour == 0:
+            send_telegram(
+                f"🔔 監控運作中\n\n"
+                f"商品：{KEYWORD}\n"
+                f"各站均未上架\n"
+                f"⏰ {now}"
+            )
 
 
 if __name__ == "__main__":
