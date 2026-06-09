@@ -1,0 +1,27 @@
+name: 女神異聞錄4R 上架監控
+
+on:
+  schedule:
+    - cron: "*/30 * * * *"   # 每 30 分鐘執行一次
+  workflow_dispatch:           # 也可以手動觸發測試
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests beautifulsoup4
+
+      - name: Run monitor
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          CHAT_ID: ${{ secrets.CHAT_ID }}
+        run: python monitor_p4r_gh.py
